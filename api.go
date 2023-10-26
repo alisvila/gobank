@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 
 	"github.com/gorilla/mux"
 )
@@ -45,8 +46,25 @@ func (s *APIServer) run() {
 	r := mux.NewRouter()
 
 	r.HandleFunc("/account", makeHttpHandler(s.handleAccount))
-	r.HandleFunc("/account/{id}", makeHttpHandler(s.handleAccount))
+	r.HandleFunc("/account/{id}", makeHttpHandler(s.handleAccountByID))
+	r.HandleFunc("/transfer", makeHttpHandler(s.handleTransfer))
 	http.ListenAndServe(s.ListenAddress, r)
+}
+
+func (s *APIServer) handleAccountByID(w http.ResponseWriter, r *http.Request) error {
+	if r.Method == "GET" {
+		strId := mux.Vars(r)["id"]
+		id, err := strconv.Atoi(strId)
+		if err != nil {
+			return fmt.Errorf("invalid id %s", strId)
+		}
+		account, err := s.Store.GetAccount(id)
+		if err != nil {
+			return err
+		}
+		return writeJson(w, http.StatusOK, account)
+	}
+	return fmt.Errorf("invalid method type %s", r.Method)
 }
 
 func (s *APIServer) handleAccount(w http.ResponseWriter, r *http.Request) error {
@@ -60,10 +78,11 @@ func (s *APIServer) handleAccount(w http.ResponseWriter, r *http.Request) error 
 }
 
 func (s *APIServer) handleGetAccount(w http.ResponseWriter, r *http.Request) error {
-	id := mux.Vars(r)["id"]
-	fmt.Println(id)
-	name := makeAccount("random", "person")
-	return writeJson(w, http.StatusOK, name)
+	accounts, err := s.Store.GetAllAccounts()
+	if err != nil {
+		return fmt.Errorf("nothing found %+v", err)
+	}
+	return writeJson(w, http.StatusOK, accounts)
 }
 
 func (s *APIServer) handleCreateAccount(w http.ResponseWriter, r *http.Request) error {
@@ -81,6 +100,14 @@ func (s *APIServer) handleCreateAccount(w http.ResponseWriter, r *http.Request) 
 	return nil
 }
 
-// func (s *APIServer) handleTransfer(w http.ResponseWriter, r *http.Request) error {
-// 	return nil
-// }
+func (s *APIServer) handleTransfer(w http.ResponseWriter, r *http.Request) error {
+	if r.Method == "POST" {
+		transferData := &TransferRequest{}
+		err := json.NewDecoder(r.Body).Decode(transferData)
+		if err != nil {
+			return err
+		}
+		return writeJson(w, http.StatusOK, transferData)
+	}
+	return nil
+}

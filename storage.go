@@ -49,7 +49,7 @@ func newPostgress() (*PostGressStorage, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer db.Close()
+	// defer db.Close()
 
 	err = db.Ping()
 	if err != nil {
@@ -64,35 +64,43 @@ func newPostgress() (*PostGressStorage, error) {
 	}
 	fmt.Println(res)
 
+	err = CreateAccountTable(db)
+	if err != nil {
+		return nil, err
+	}
 	return &PostGressStorage{
 		db: db,
 	}, nil
 }
 
-func (s *PostGressStorage) runQueryWithCtx(query string) (sql.Result, error) {
+func runQueryWithCtx(query string, db *sql.DB) (sql.Result, error) {
 	ctx, cancelfunc := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancelfunc()
-	return s.db.ExecContext(ctx, query)
+	return db.ExecContext(ctx, query)
 }
 
-func (s *PostGressStorage) CreateAccountTable() error {
-	query := `create table if not exists accounts (
+func CreateAccountTable(db *sql.DB) error {
+	query := `create table if not exists account (
 		id serial primary key,
-		firsname varchar(50),
-		lastname varchar(50),
+		first_name varchar(100),
+		last_name varchar(100),
 		number serial,
+		encrypted_password varchar(100),
 		balance serial,
 		created_at timestamp
 	)`
-	_, err := s.runQueryWithCtx(query)
+	_, err := runQueryWithCtx(query, db)
 	return err
 }
 
 func (s *PostGressStorage) CreateAccount(acc *Account) error {
-	query := `insert into account
-	(firstname, lastname, number, balance, craeted_at)
-	values ($1,$2,$3,$4,$5,$6)`
+	query := `insert into account 
+	(first_name, last_name, number, balance, created_at)
+	values ($1, $2, $3, $4, $5)`
+
+	fmt.Printf("the calu %+v", acc)
 	_, err := s.db.Query(query, acc.Firstname, acc.Lastname, acc.Number, acc.Balance, acc.createdAt)
+	fmt.Println(err)
 	if err != nil {
 		return err
 	}
@@ -116,7 +124,7 @@ func (s *PostGressStorage) GetAccount(accNumber int) (*Account, error) {
 
 	account := &Account{}
 	for rows.Next() {
-		err := rows.Scan(&account.Firstname, &account.Lastname, &account.Balance, &account.Number, &account.createdAt)
+		err := rows.Scan(&account.ID, &account.Firstname, &account.Lastname, &account.Balance, &account.Number, &account.EncryptedPassword, &account.createdAt)
 		if err != nil {
 			return nil, err
 		}
@@ -124,7 +132,7 @@ func (s *PostGressStorage) GetAccount(accNumber int) (*Account, error) {
 	return account, nil
 }
 func (s *PostGressStorage) GetAllAccounts() ([]*Account, error) {
-	query := "select * from accounts"
+	query := "select * from account"
 	rows, err := s.db.Query(query)
 	if err != nil {
 		return nil, err
@@ -133,7 +141,7 @@ func (s *PostGressStorage) GetAllAccounts() ([]*Account, error) {
 	accounts := []*Account{}
 	for rows.Next() {
 		account := &Account{}
-		if err := rows.Scan(&account.Firstname, &account.Lastname, &account.Balance, &account.Number, &account.createdAt); err != nil {
+		if err := rows.Scan(&account.ID, &account.Firstname, &account.Lastname, &account.Balance, &account.EncryptedPassword, &account.Number, &account.createdAt); err != nil {
 			return accounts, err
 		}
 		accounts = append(accounts, account)
