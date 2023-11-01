@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"time"
 
+	"github.com/golang-jwt/jwt"
 	"github.com/gorilla/mux"
 )
 
@@ -48,7 +50,38 @@ func (s *APIServer) run() {
 	r.HandleFunc("/account", makeHttpHandler(s.handleAccount))
 	r.HandleFunc("/account/{id}", makeHttpHandler(s.handleAccountByID))
 	r.HandleFunc("/transfer", makeHttpHandler(s.handleTransfer))
+	r.HandleFunc("/login", makeHttpHandler(s.handleLogin))
 	http.ListenAndServe(s.ListenAddress, r)
+}
+
+func (s *APIServer) handleLogin(w http.ResponseWriter, r *http.Request) error {
+	if r.Method != "POST" {
+		return fmt.Errorf("method not allowed %s", r.Method)
+	}
+
+	loginRequest := LoginRequest{}
+
+	err := json.NewDecoder(r.Body).Decode(loginRequest)
+	if err != nil {
+		return fmt.Errorf("wrong")
+	}
+
+	accInt, err := strconv.Atoi(loginRequest.Username)
+	if err != nil {
+		return fmt.Errorf("ow")
+	}
+	acc, err := s.Store.GetAccount(accInt)
+
+	token, err := generateJWT()
+	if err != nil {
+		return fmt.Errorf("oops again")
+	}
+
+	resp := LoginResponse{
+		Token:  token,
+		UserID: string(acc.Number),
+	}
+	return writeJson(w, http.StatusOK, resp)
 }
 
 func (s *APIServer) handleAccountByID(w http.ResponseWriter, r *http.Request) error {
@@ -110,4 +143,36 @@ func (s *APIServer) handleTransfer(w http.ResponseWriter, r *http.Request) error
 		return writeJson(w, http.StatusOK, transferData)
 	}
 	return nil
+}
+
+var secret = []byte("somesecretherer")
+
+func generateJWT() (string, error) {
+	token := jwt.New(jwt.SigningMethodEdDSA)
+
+	claims := token.Claims.(jwt.MapClaims)
+	claims["exp"] = time.Now().Add(10 * time.Minute)
+	claims["auth"] = true
+	claims["user"] = "just"
+
+	tokenString, err := token.SignedString(secret)
+	if err != nil {
+		return "", err
+	}
+	return tokenString, nil
+}
+
+func validateJWT(tokenString string) (*jwt.Token, error) {
+	// secret := os.Getenv("JWT_SECRET")
+	secret := "JWT_SECRET"
+
+	return jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+		// Don't forget to validate the alg is what you expect:
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, fmt.Errorf("Unexpected signing method: %v", token.Header["alg"])
+		}
+
+		// hmacSampleSecret is a []byte containing your secret, e.g. []byte("my_secret_key")
+		return []byte(secret), nil
+	})
 }
