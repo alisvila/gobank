@@ -47,7 +47,7 @@ func newAPIServer(listen string, store Storage) *APIServer {
 func (s *APIServer) run() {
 	r := mux.NewRouter()
 
-	r.HandleFunc("/account", makeHttpHandler(s.handleAccount))
+	r.HandleFunc("/account", withJWTAuth(makeHttpHandler(s.handleAccount)))
 	r.HandleFunc("/account/{id}", makeHttpHandler(s.handleAccountByID))
 	r.HandleFunc("/transfer", makeHttpHandler(s.handleTransfer))
 	r.HandleFunc("/login", makeHttpHandler(s.handleLogin))
@@ -61,7 +61,7 @@ func (s *APIServer) handleLogin(w http.ResponseWriter, r *http.Request) error {
 
 	loginRequest := LoginRequest{}
 
-	err := json.NewDecoder(r.Body).Decode(loginRequest)
+	err := json.NewDecoder(r.Body).Decode(&loginRequest)
 	if err != nil {
 		return fmt.Errorf("wrong")
 	}
@@ -71,6 +71,9 @@ func (s *APIServer) handleLogin(w http.ResponseWriter, r *http.Request) error {
 		return fmt.Errorf("ow")
 	}
 	acc, err := s.Store.GetAccount(accInt)
+	if err != nil {
+		return fmt.Errorf("ow")
+	}
 
 	token, err := generateJWT()
 	if err != nil {
@@ -79,7 +82,7 @@ func (s *APIServer) handleLogin(w http.ResponseWriter, r *http.Request) error {
 
 	resp := LoginResponse{
 		Token:  token,
-		UserID: string(acc.Number),
+		UserID: fmt.Sprint(acc.Number),
 	}
 	return writeJson(w, http.StatusOK, resp)
 }
@@ -154,6 +157,7 @@ func generateJWT() (string, error) {
 	claims["exp"] = time.Now().Add(10 * time.Minute)
 	claims["auth"] = true
 	claims["user"] = "just"
+	claims["role"] = "admin"
 
 	tokenString, err := token.SignedString(secret)
 	if err != nil {
@@ -162,10 +166,29 @@ func generateJWT() (string, error) {
 	return tokenString, nil
 }
 
-func validateJWT(tokenString string) (*jwt.Token, error) {
-	// secret := os.Getenv("JWT_SECRET")
-	secret := "JWT_SECRET"
+func withJWTAuth(handlefunc http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		tokenString := r.Header.Get("Authorization")
+		token, err := validateJWT(tokenString)
+		if err != nil {
+			writeJson(w, http.StatusForbidden, ApiError{Error: "acces denied"})
+			return
+		}
+		if !token.Valid {
+			writeJson(w, http.StatusForbidden, ApiError{Error: "acces denied"})
+			return
+		}
+		// uid := r.Header
+		claims := token.Claims.(jwt.MapClaims)
+		if claims["role"] != "admin" {
+			writeJson(w, http.StatusForbidden, ApiError{Error: "acces denied"})
+			return
+		}
+		handlefunc(w, r)
+	}
+}
 
+func validateJWT(tokenString string) (*jwt.Token, error) {
 	return jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
 		// Don't forget to validate the alg is what you expect:
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
